@@ -301,7 +301,8 @@ DispatchQueue.concurrentPerform(iterations: files.count) { index in
     let file = File(path: compilableFile.file)!
     let allCursorInfo = file.allCursorInfo(compilerArguments: compilableFile.compilerArguments, atByteOffsets: byteOffsets)
     let cursorsMissingExplicitSelf = allCursorInfo.filter { cursorInfo in
-        return kindsToFind.contains(cursorInfo["key.kind"] as! String)
+        guard let kindString = cursorInfo["key.kind"] as? String else { return false }
+        return kindsToFind.contains(kindString)
     }
 
     let contents = file.contents.bridge().mutableCopy() as! NSMutableString
