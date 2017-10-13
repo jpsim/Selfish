@@ -3,13 +3,29 @@ import Gzip
 import SourceKittenFramework
 import SwiftHash
 
+let path: String
+let logPath: String?
+if CommandLine.arguments.count == 3 {
+  path = CommandLine.arguments[1]
+  logPath = CommandLine.arguments[2]
+} else if CommandLine.arguments.count == 2 {
+  path = CommandLine.arguments[1]
+  logPath = nil
+} else {
+  path = FileManager.default.currentDirectoryPath
+  logPath = nil
+}
+
 final class CompilableFile {
     let file: String
     let compilerArguments: [String]
 
-    init?(file: String) {
+    init?(file: String, logPath: String?) {
         self.file = file
-        if let args = getCompilerArguments(forSourceFile: file) {
+        if let logPath = logPath,
+          let args = compileCommand(logFile: logPath, sourceFile: file) {
+            self.compilerArguments = args
+        } else if let args = getCompilerArguments(forSourceFile: file) {
             self.compilerArguments = args
         } else {
             return nil
@@ -101,7 +117,7 @@ func activityLogs(inPath path: String) -> [String] {
 
 func contentsOfGzippedFile(atPath path: String) -> String? {
     guard let compressedData = FileManager.default.contents(atPath: path),
-        let decompressedData = try? compressedData.gunzipped() else {
+        let decompressedData = compressedData.isGzipped ? try? compressedData.gunzipped() : compressedData else {
             return nil
     }
     return String(data: decompressedData, encoding: .utf8)
@@ -286,12 +302,12 @@ func binaryOffsets(for compilableFile: CompilableFile) -> [Int] {
     return binaryOffsets.sorted()
 }
 
-let files = FileManager.default.filesToLint(inPath: FileManager.default.currentDirectoryPath)
+let files = FileManager.default.filesToLint(inPath: path)
 DispatchQueue.concurrentPerform(iterations: files.count) { index in
     let path = files[index]
     print("\(index + 1)/\(files.count): \(path)")
 
-    guard let compilableFile = CompilableFile(file: path) else {
+    guard let compilableFile = CompilableFile(file: path, logPath: logPath) else {
         print("Couldn't find compiler arguments for file. Skipping: \(path)")
         return
     }
