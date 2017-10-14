@@ -305,7 +305,7 @@ func binaryOffsets(for compilableFile: CompilableFile) -> [Int] {
 let files = FileManager.default.filesToLint(inPath: path)
 DispatchQueue.concurrentPerform(iterations: files.count) { index in
     let path = files[index]
-    print("\(index + 1)/\(files.count): \(path)")
+    // print("\(index + 1)/\(files.count): \(path)")
 
     guard let compilableFile = CompilableFile(file: path, logPath: logPath) else {
         print("Couldn't find compiler arguments for file. Skipping: \(path)")
