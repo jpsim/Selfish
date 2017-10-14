@@ -302,6 +302,13 @@ func binaryOffsets(for compilableFile: CompilableFile) -> [Int] {
     return binaryOffsets.sorted()
 }
 
+enum RunMode {
+  case log
+  case overwrite
+}
+
+let mode = RunMode.log
+
 let files = FileManager.default.filesToLint(inPath: path)
 DispatchQueue.concurrentPerform(iterations: files.count) { index in
     let path = files[index]
@@ -322,6 +329,16 @@ DispatchQueue.concurrentPerform(iterations: files.count) { index in
     }
 
     let contents = file.contents.bridge().mutableCopy() as! NSMutableString
+
+    if mode == .log {
+        for cursorInfo in cursorsMissingExplicitSelf {
+            guard let byteOffset = cursorInfo["jp.offset"] as? Int64,
+                let (line, char) = contents.lineAndCharacter(forByteOffset: Int(byteOffset))
+                else { fatalError("couldn't convert offsets") }
+            print("\(compilableFile.file):\(line):\(char): error: Missing explicit reference to 'self.'")
+        }
+        return
+    }
 
     for cursorInfo in cursorsMissingExplicitSelf.reversed() {
         guard let byteOffset = cursorInfo["jp.offset"] as? Int64,
