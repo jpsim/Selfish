@@ -302,15 +302,46 @@ func binaryOffsets(for compilableFile: CompilableFile) -> [Int] {
     return binaryOffsets.sorted()
 }
 
+func swiftFilesChangedFromMaster() -> [String]? {
+    let task = Process()
+    task.launchPath = "/usr/bin/git"
+    task.arguments = ["diff", "--name-only", "master", "HEAD"]
+
+    let pipe = Pipe()
+    task.standardOutput = pipe
+    task.launch()
+
+    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+    guard let output = String(data: data, encoding: .utf8) else {
+        return nil
+    }
+    return output.components(separatedBy: .newlines)
+        .filter { !$0.isEmpty }
+        .filter { file in
+            return file.bridge().isSwiftFile() && FileManager.default.fileExists(atPath: file)
+    }
+}
+
 enum RunMode {
   case log
   case overwrite
 }
 
-let mode = RunMode.log
+enum FilesMode {
+    case cli
+    case git
+}
+
+let runMode = RunMode.log
+let filesMode = FilesMode.git
 var didFindViolations = false
 
-let files = FileManager.default.filesToLint(inPath: path)
+let files: [String]
+switch filesMode {
+case .cli: files = FileManager.default.filesToLint(inPath: path)
+case .git: files = swiftFilesChangedFromMaster()!
+}
+
 DispatchQueue.concurrentPerform(iterations: files.count) { index in
     let path = files[index]
     // print("\(index + 1)/\(files.count): \(path)")
@@ -331,7 +362,7 @@ DispatchQueue.concurrentPerform(iterations: files.count) { index in
 
     let contents = file.contents.bridge().mutableCopy() as! NSMutableString
 
-    if mode == .log {
+    if runMode == .log {
         for cursorInfo in cursorsMissingExplicitSelf {
             guard let byteOffset = cursorInfo["jp.offset"] as? Int64,
                 let (line, char) = contents.lineAndCharacter(forByteOffset: Int(byteOffset))
