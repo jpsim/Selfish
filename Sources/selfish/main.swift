@@ -1,18 +1,12 @@
 import Foundation
 import SourceKittenFramework
 
-let path: String
-let logPath: String?
-if CommandLine.arguments.count == 3 {
-  path = CommandLine.arguments[1]
-  logPath = CommandLine.arguments[2]
-} else if CommandLine.arguments.count == 2 {
-  path = CommandLine.arguments[1]
-  logPath = nil
-} else {
-  path = FileManager.default.currentDirectoryPath
-  logPath = nil
+guard CommandLine.arguments.count == 2 else {
+    print("Usage: selfish xcodebuild-log-path")
+    abort()
 }
+
+let logPath = CommandLine.arguments[1]
 
 final class CompilableFile {
     let file: String
@@ -223,24 +217,12 @@ enum RunMode {
   case overwrite
 }
 
-enum FilesMode {
-    case cli
-    case git
-}
-
 let runMode = RunMode.log
-let filesMode = FilesMode.git
 var didFindViolations = false
 
-let files: [String]
-switch filesMode {
-case .cli: files = FileManager.default.filesToLint(inPath: path)
-case .git: files = swiftFilesChangedFromMaster()!
-}
-
+let files = swiftFilesChangedFromMaster()!
 DispatchQueue.concurrentPerform(iterations: files.count) { index in
     let path = files[index]
-    // print("\(index + 1)/\(files.count): \(path)")
 
     guard let compilableFile = CompilableFile(file: path, logPath: logPath) else {
         print("Couldn't find compiler arguments for file. Skipping: \(path)")
