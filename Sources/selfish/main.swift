@@ -1,7 +1,5 @@
 import Foundation
-import Gzip
 import SourceKittenFramework
-import SwiftHash
 
 let path: String
 let logPath: String?
@@ -25,108 +23,19 @@ final class CompilableFile {
         if let logPath = logPath,
           let args = compileCommand(logFile: logPath, sourceFile: file) {
             self.compilerArguments = args
-        } else if let args = getCompilerArguments(forSourceFile: file) {
-            self.compilerArguments = args
         } else {
             return nil
         }
     }
 }
 
-// Thanks to: http://samdmarshall.com/blog/xcode_deriveddata_hashes.html
-
-/// Create the unique identifier string for a Xcode project path.
-///
-/// - parameter path: String path to the ".xcodeproj" or ".xcworkspace" file.
-///
-/// - returns: Hash string for the identifier.
-func hashString(forPath path: String) -> String {
-    func convert<S: StringProtocol>(hex: S) -> String {
-        var startValue = UInt64(hex, radix: 16)!
-        var resultStr = ""
-        let aValue = Int(("a" as Unicode.Scalar).value)
-        for _ in 0...13 {
-            let charScalar = Int(startValue % 26)
-            let unicodeScalar = Unicode.Scalar(charScalar + aValue)!
-            resultStr.insert(Character(unicodeScalar), at: resultStr.startIndex)
-            startValue /= 26
-        }
-        return resultStr
-    }
-    let md5 = MD5(path)
-    let first16 = md5[..<md5.index(md5.startIndex, offsetBy: 16)]
-    let last16 = md5[md5.index(md5.startIndex, offsetBy: 16)...]
-    return [first16, last16].reduce("") { $0 + convert(hex: $1) }
-}
-
-func logDirectoryForProject(_ projectPath: String) -> String? {
-    let projectName = URL(fileURLWithPath: projectPath).lastPathComponent.split(separator: ".")[0]
-    let homeDir = NSHomeDirectory()
-    let underscoredProjectName = String(projectName).replacingOccurrences(of: " ", with: "_")
-    let projectHash = hashString(forPath: projectPath)
-    return "\(homeDir)/Library/Developer/Xcode/DerivedData/\(underscoredProjectName)-\(projectHash)/Logs/Build"
-}
-
-func fileWithExtension(_ pathExtension: String, inFiles files: [String]) -> String? {
-    return files.first { file in
-        return NSString(string: file).pathExtension == pathExtension
-    }
-}
-
-func projectForSourceFile(_ sourceFile: String) -> String? {
-    let directory = URL(fileURLWithPath: sourceFile).deletingLastPathComponent().path
-    guard directory != "/" else {
-        return nil
-    }
-    let manager = FileManager.default
-    guard let fileList = try? manager.contentsOfDirectory(atPath: directory) else {
-        fatalError("Could not read contents of directory: \(directory)")
-    }
-    let optionalProjectFile = fileWithExtension("xcworkspace", inFiles: fileList) ??
-        fileWithExtension("xcodeproj", inFiles: fileList)
-    guard let projectFile = optionalProjectFile else {
-        return projectForSourceFile(directory)
-    }
-
-    let projectPath = URL(fileURLWithPath: directory).appendingPathComponent(projectFile).path
-    if let logDir = logDirectoryForProject(projectPath),
-        manager.fileExists(atPath: logDir) {
-        return projectPath
-    }
-    return projectForSourceFile(directory)
-}
-
-func activityLogs(inPath path: String) -> [String] {
-    let manager = FileManager.default
-    guard let fileList = try? manager.contentsOfDirectory(atPath: path) else {
-        fatalError("Could not read contents of directory: \(path)")
-    }
-    return fileList
-        .filter { file in
-            return file.hasSuffix(".xcactivitylog")
-        }
-        .map { file in
-            return "\(path)/\(file)"
-        }
-        .sorted { file1, file2 in
-            let date1 = try! manager.attributesOfItem(atPath: file1)[.modificationDate] as! Date
-            let date2 = try! manager.attributesOfItem(atPath: file2)[.modificationDate] as! Date
-            return date1 > date2
-    }
-}
-
-func contentsOfGzippedFile(atPath path: String) -> String? {
-    guard let compressedData = FileManager.default.contents(atPath: path),
-        let decompressedData = compressedData.isGzipped ? try? compressedData.gunzipped() : compressedData else {
-            return nil
-    }
-    return String(data: decompressedData, encoding: .utf8)
-}
-
 func compileCommand(logFile: String, sourceFile: String) -> [String]? {
     var compileCommand: [String]?
     let escapedSourceFile = sourceFile.replacingOccurrences(of: " ", with: "\\ ")
-    if let contents = contentsOfGzippedFile(atPath: logFile), contents.contains(escapedSourceFile) {
+    if let data = FileManager.default.contents(atPath: logFile),
+        let contents = String(data: data, encoding: .utf8),
+        contents.contains(escapedSourceFile)
+    {
         contents.enumerateLines { line, stop in
             if line.contains(escapedSourceFile),
                 let swiftcIndex = line.range(of: "swiftc ")?.upperBound,
@@ -210,19 +119,6 @@ private func filter(arguments args: [String]) -> [String] {
         }
         return $0
     }
-}
-
-func getCompilerArguments(forSourceFile sourceFile: String) -> [String]? {
-    guard let project = projectForSourceFile(sourceFile),
-        let logDir = logDirectoryForProject(project) else {
-            return nil
-    }
-    for log in activityLogs(inPath: logDir) {
-        if let compileCommand = compileCommand(logFile: log, sourceFile: sourceFile) {
-            return compileCommand
-        }
-    }
-    return nil
 }
 
 private let kindsToFind = Set([
