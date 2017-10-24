@@ -6,6 +6,11 @@ guard CommandLine.arguments.count == 2 else {
     abort()
 }
 
+if CommandLine.arguments[1] == "-v" {
+    print("0.0.6")
+    exit(0)
+}
+
 let logPath = CommandLine.arguments[1]
 
 final class CompilableFile {
