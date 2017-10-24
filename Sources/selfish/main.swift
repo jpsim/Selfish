@@ -195,7 +195,7 @@ func binaryOffsets(for compilableFile: CompilableFile) -> [Int] {
 func swiftFilesChangedFromMaster() -> [String]? {
     let task = Process()
     task.launchPath = "/usr/bin/git"
-    task.arguments = ["diff", "--name-only", "master", "HEAD"]
+    task.arguments = ["diff", "--name-only", "origin/master", "HEAD"]
 
     let pipe = Pipe()
     task.standardOutput = pipe
