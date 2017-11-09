@@ -18,9 +18,9 @@ final class CompilableFile {
     let compilerArguments: [String]
 
     init?(file: String, logPath: String?) {
-        self.file = file
+        self.file = file.bridge().absolutePathRepresentation()
         if let logPath = logPath,
-          let args = compileCommand(logFile: logPath, sourceFile: file) {
+          let args = compileCommand(logFile: logPath, sourceFile: self.file) {
             self.compilerArguments = args
         } else {
             return nil
@@ -190,8 +190,7 @@ extension NSString {
 }
 
 func binaryOffsets(for compilableFile: CompilableFile) -> [Int] {
-    let absoluteFile = compilableFile.file.bridge().absolutePathRepresentation()
-    let index = Request.index(file: absoluteFile, arguments: compilableFile.compilerArguments).send()
+    let index = Request.index(file: compilableFile.file, arguments: compilableFile.compilerArguments).send()
     let file = File(path: compilableFile.file)!
     let binaryOffsets = file.contents.bridge().recursiveByteOffsets(index)
     return binaryOffsets.sorted()
