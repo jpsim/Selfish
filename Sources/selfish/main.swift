@@ -70,7 +70,6 @@ final class CompilableFile {
 
     init?(file: String, logDir: String) {
         self.file = file.bridge().absolutePathRepresentation()
-            .replacingOccurrences(of: "/Users/jsimard/Projects/Lyft-iOS/", with: "/Users/distiller/Lyft-iOS/")
         for logFile in activityLogs(inPath: logDir) {
             if let args = compileCommand(logFile: logFile, sourceFile: self.file) {
                 compilerArguments = args
