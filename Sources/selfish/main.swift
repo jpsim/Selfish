@@ -1,40 +1,127 @@
 import Foundation
 import SourceKittenFramework
+import zlib
 
 guard CommandLine.arguments.count == 2 else {
-    print("Usage: selfish xcodebuild-log-path")
+    print("Usage: selfish xcactivitylog-logs-directory")
     abort()
 }
 
 if CommandLine.arguments[1] == "-v" {
-    print("0.0.8")
+    print("0.0.9")
     exit(0)
 }
 
-let logPath = CommandLine.arguments[1]
+let logDir = CommandLine.arguments[1]
+
+extension Data {
+    var isGzipped: Bool {
+        return starts(with: [0x1f, 0x8b])
+    }
+
+    func gunzipped() -> Data? {
+        guard !isEmpty else {
+            return Data()
+        }
+
+        var stream = z_stream()
+        withUnsafeBytes { (bytes: UnsafePointer<Bytef>) in
+            stream.next_in = UnsafeMutablePointer(mutating: bytes)
+        }
+        stream.avail_in = uint(count)
+        var status: Int32
+
+        status = inflateInit2_(&stream, MAX_WBITS + 32, ZLIB_VERSION, Int32(MemoryLayout<z_stream>.size))
+
+        guard status == Z_OK else {
+            // Error
+            return nil
+        }
+
+        var data = Data(capacity: count * 2)
+
+        repeat {
+            if Int(stream.total_out) >= data.count {
+                data.count += count / 2
+            }
+
+            data.withUnsafeMutableBytes { (bytes: UnsafeMutablePointer<Bytef>) in
+                stream.next_out = bytes.advanced(by: Int(stream.total_out))
+            }
+            stream.avail_out = uInt(data.count) - uInt(stream.total_out)
+
+            status = inflate(&stream, Z_SYNC_FLUSH)
+        } while status == Z_OK
+
+        guard inflateEnd(&stream) == Z_OK && status == Z_STREAM_END else {
+            // Error
+            return nil
+        }
+
+        data.count = Int(stream.total_out)
+
+        return data
+    }
+}
 
 final class CompilableFile {
     let file: String
     let compilerArguments: [String]
 
-    init?(file: String, logPath: String?) {
+    init?(file: String, logDir: String) {
         self.file = file.bridge().absolutePathRepresentation()
-        if let logPath = logPath,
-          let args = compileCommand(logFile: logPath, sourceFile: self.file) {
-            self.compilerArguments = args
-        } else {
-            return nil
+            .replacingOccurrences(of: "/Users/jsimard/Projects/Lyft-iOS/", with: "/Users/distiller/Lyft-iOS/")
+        for logFile in activityLogs(inPath: logDir) {
+            if let args = compileCommand(logFile: logFile, sourceFile: self.file) {
+                compilerArguments = args
+                return
+            }
         }
+        return nil
     }
+}
+
+extension FileManager {
+    func recursiveFiles(inPath path: String, `extension`: String) -> [String] {
+        let absolutePath = path.bridge()
+            .absolutePathRepresentation(rootDirectory: currentDirectoryPath).bridge()
+            .standardizingPath
+
+        // if path is a file, it won't be returned in `enumerator(atPath:)`
+        if absolutePath.bridge().pathExtension == `extension` && fileExists(atPath: absolutePath) {
+            return [absolutePath]
+        }
+
+        return enumerator(atPath: absolutePath)?.flatMap { element -> String? in
+            if let element = element as? String, element.bridge().pathExtension == `extension` {
+                return absolutePath.bridge().appendingPathComponent(element)
+            }
+            return nil
+            } ?? []
+    }
+}
+
+func activityLogs(inPath path: String) -> [String] {
+    let manager = FileManager.default
+    return manager.recursiveFiles(inPath: path, extension: "xcactivitylog").sorted { file1, file2 in
+        let date1 = try! manager.attributesOfItem(atPath: file1)[.modificationDate] as! Date
+        let date2 = try! manager.attributesOfItem(atPath: file2)[.modificationDate] as! Date
+        return date1 > date2
+    }
+}
+
+func contentsOfGzippedFile(atPath path: String) -> String? {
+    guard let compressedData = FileManager.default.contents(atPath: path),
+        let decompressedData = compressedData.isGzipped ? compressedData.gunzipped() : compressedData else {
+            return nil
+    }
+    return String(data: decompressedData, encoding: .utf8)
 }
 
 func compileCommand(logFile: String, sourceFile: String) -> [String]? {
     var compileCommand: [String]?
     let escapedSourceFile = sourceFile.replacingOccurrences(of: " ", with: "\\ ")
-    if let data = FileManager.default.contents(atPath: logFile),
-        let contents = String(data: data, encoding: .utf8),
-        contents.contains(escapedSourceFile)
-    {
+    if let contents = contentsOfGzippedFile(atPath: logFile), contents.contains(escapedSourceFile) {
         contents.enumerateLines { line, stop in
             if line.contains(escapedSourceFile),
                 let swiftcIndex = line.range(of: "swiftc ")?.upperBound,
@@ -125,31 +212,6 @@ private let kindsToFind = Set([
     "source.lang.swift.ref.var.instance"
 ])
 
-public protocol LintableFileManager {
-    func filesToLint(inPath: String, rootDirectory: String?) -> [String]
-}
-
-extension FileManager: LintableFileManager {
-    public func filesToLint(inPath path: String, rootDirectory: String? = nil) -> [String] {
-        let rootPath = rootDirectory ?? currentDirectoryPath
-        let absolutePath = path.bridge()
-            .absolutePathRepresentation(rootDirectory: rootPath).bridge()
-            .standardizingPath
-
-        // if path is a file, it won't be returned in `enumerator(atPath:)`
-        if absolutePath.bridge().isSwiftFile() && fileExists(atPath: absolutePath) {
-            return [absolutePath]
-        }
-
-        return enumerator(atPath: absolutePath)?.flatMap { element -> String? in
-            if let element = element as? String, element.bridge().isSwiftFile() {
-                return absolutePath.bridge().appendingPathComponent(element)
-            }
-            return nil
-        } ?? []
-    }
-}
-
 extension File {
     fileprivate func allCursorInfo(compilerArguments: [String],
                                    atByteOffsets byteOffsets: [Int]) -> [[String: SourceKitRepresentable]] {
@@ -228,10 +290,12 @@ let files = swiftFilesChangedFromMaster()!
 DispatchQueue.concurrentPerform(iterations: files.count) { index in
     let path = files[index]
 
-    guard let compilableFile = CompilableFile(file: path, logPath: logPath) else {
+    guard let compilableFile = CompilableFile(file: path, logDir: logDir) else {
         print("Couldn't find compiler arguments for file. Skipping: \(path)")
         return
     }
+
+    print("Finding missing explicit references to 'self.' in file: \(path)")
 
     let byteOffsets = binaryOffsets(for: compilableFile)
 
