@@ -17,10 +17,9 @@ final class CompilableFile {
     let file: String
     let compilerArguments: [String]
 
-    init?(file: String, logPath: String?) {
+    init?(file: String, logContents: String) {
         self.file = file
-        if let logPath = logPath,
-          let args = compileCommand(logFile: logPath, sourceFile: file) {
+        if let args = compileCommand(logContents: logContents, sourceFile: file) {
             self.compilerArguments = args
         } else {
             return nil
@@ -28,14 +27,12 @@ final class CompilableFile {
     }
 }
 
-func compileCommand(logFile: String, sourceFile: String) -> [String]? {
+func compileCommand(logContents: String, sourceFile: String) -> [String]? {
     var compileCommand: [String]?
     let escapedSourceFile = sourceFile.replacingOccurrences(of: " ", with: "\\ ")
-    if let data = FileManager.default.contents(atPath: logFile),
-        let contents = String(data: data, encoding: .utf8),
-        contents.contains(escapedSourceFile)
+    if logContents.contains(escapedSourceFile)
     {
-        contents.enumerateLines { line, stop in
+        logContents.enumerateLines { line, stop in
             if line.contains(escapedSourceFile),
                 let swiftcIndex = line.range(of: "swiftc ")?.upperBound,
                 line.contains(" -module-name ") {
@@ -225,16 +222,21 @@ enum RunMode {
 let runMode = RunMode.overwrite
 var didFindViolations = false
 
+guard let data = FileManager.default.contents(atPath: logPath),
+    let logContents = String(data: data, encoding: .utf8) else {
+        fatalError("couldn't read log file at path '\(logPath)'")
+}
+
 let files = FileManager.default.filesToLint(inPath: "Modules")
 DispatchQueue.concurrentPerform(iterations: files.count) { index in
     let path = files[index]
 
-    guard let compilableFile = CompilableFile(file: path, logPath: logPath) else {
+    guard let compilableFile = CompilableFile(file: path, logContents: logContents) else {
         print("Couldn't find compiler arguments for file. Skipping: \(path)")
         return
     }
 
-    print("Linting \(path)")
+    print("Linting \(index)/\(files.count) \(path)")
 
     let byteOffsets = binaryOffsets(for: compilableFile)
 
