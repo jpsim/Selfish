@@ -7,7 +7,7 @@ guard CommandLine.arguments.count == 2 else {
 }
 
 if CommandLine.arguments[1] == "-v" {
-    print("0.0.6")
+    print("0.0.10")
     exit(0)
 }
 
