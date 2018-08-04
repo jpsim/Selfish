@@ -222,10 +222,10 @@ enum RunMode {
   case overwrite
 }
 
-let runMode = RunMode.log
+let runMode = RunMode.overwrite
 var didFindViolations = false
 
-let files = swiftFilesChangedFromMaster()!
+let files = FileManager.default.filesToLint(inPath: "Modules")
 DispatchQueue.concurrentPerform(iterations: files.count) { index in
     let path = files[index]
 
@@ -233,6 +233,8 @@ DispatchQueue.concurrentPerform(iterations: files.count) { index in
         print("Couldn't find compiler arguments for file. Skipping: \(path)")
         return
     }
+
+    print("Linting \(path)")
 
     let byteOffsets = binaryOffsets(for: compilableFile)
 
