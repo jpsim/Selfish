@@ -227,7 +227,7 @@ guard let data = FileManager.default.contents(atPath: logPath),
         fatalError("couldn't read log file at path '\(logPath)'")
 }
 
-let files = FileManager.default.filesToLint(inPath: "Modules")
+let files = FileManager.default.filesToLint(inPath: "")
 DispatchQueue.concurrentPerform(iterations: files.count) { index in
     let path = files[index]
 
