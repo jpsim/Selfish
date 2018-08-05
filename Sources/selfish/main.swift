@@ -138,7 +138,7 @@ extension FileManager: LintableFileManager {
             return [absolutePath]
         }
 
-        return enumerator(atPath: absolutePath)?.flatMap { element -> String? in
+        return enumerator(atPath: absolutePath)?.compactMap { element -> String? in
             if let element = element as? String, element.bridge().isSwiftFile() {
                 return absolutePath.bridge().appendingPathComponent(element)
             }
@@ -149,11 +149,11 @@ extension FileManager: LintableFileManager {
 
 extension File {
     fileprivate func allCursorInfo(compilerArguments: [String],
-                                   atByteOffsets byteOffsets: [Int]) -> [[String: SourceKitRepresentable]] {
-        return byteOffsets.flatMap { offset in
+                                   atByteOffsets byteOffsets: [Int]) throws -> [[String: SourceKitRepresentable]] {
+        return try byteOffsets.compactMap { offset in
             if contents.substringWithByteRange(start: offset - 1, length: 1)! == "." { return nil }
-            var cursorInfo = Request.cursorInfo(file: self.path!, offset: Int64(offset),
-                                                arguments: compilerArguments).send()
+            var cursorInfo = try Request.cursorInfo(file: self.path!, offset: Int64(offset),
+                                                    arguments: compilerArguments).send()
             cursorInfo["jp.offset"] = Int64(offset)
             return cursorInfo
         }
@@ -186,9 +186,9 @@ extension NSString {
     }
 }
 
-func binaryOffsets(for compilableFile: CompilableFile) -> [Int] {
+func binaryOffsets(for compilableFile: CompilableFile) throws -> [Int] {
     let absoluteFile = compilableFile.file.bridge().absolutePathRepresentation()
-    let index = Request.index(file: absoluteFile, arguments: compilableFile.compilerArguments).send()
+    let index = try Request.index(file: absoluteFile, arguments: compilableFile.compilerArguments).send()
     let file = File(path: compilableFile.file)!
     let binaryOffsets = file.contents.bridge().recursiveByteOffsets(index)
     return binaryOffsets.sorted()
@@ -236,12 +236,24 @@ DispatchQueue.concurrentPerform(iterations: files.count) { index in
         return
     }
 
+    guard let file = File(path: compilableFile.file) else {
+        print("Couldn't read contents of file. Skipping: \(path)")
+        return
+    }
+
     print("Linting \(index)/\(files.count) \(path)")
 
-    let byteOffsets = binaryOffsets(for: compilableFile)
+    let byteOffsets: [Int]
+    let allCursorInfo: [[String: SourceKitRepresentable]]
+    do {
+        byteOffsets = try binaryOffsets(for: compilableFile)
+        allCursorInfo = try file.allCursorInfo(compilerArguments: compilableFile.compilerArguments,
+                                               atByteOffsets: byteOffsets)
+    } catch {
+        print(error)
+        return
+    }
 
-    let file = File(path: compilableFile.file)!
-    let allCursorInfo = file.allCursorInfo(compilerArguments: compilableFile.compilerArguments, atByteOffsets: byteOffsets)
     let cursorsMissingExplicitSelf = allCursorInfo.filter { cursorInfo in
         guard let kindString = cursorInfo["key.kind"] as? String else { return false }
         return kindsToFind.contains(kindString)
