@@ -1,5 +1,6 @@
 import Foundation
 import SourceKittenFramework
+import Yams
 
 guard CommandLine.arguments.count == 2 else {
     print("Usage: selfish xcodebuild-log-path")
@@ -20,6 +21,15 @@ final class CompilableFile {
     init?(file: String, logContents: String) {
         self.file = file
         if let args = compileCommand(logContents: logContents, sourceFile: file) {
+            self.compilerArguments = args
+        } else {
+            return nil
+        }
+    }
+
+    init?(file: String, args: [String]?) {
+        self.file = file
+        if let args = args {
             self.compilerArguments = args
         } else {
             return nil
@@ -222,16 +232,43 @@ enum RunMode {
 let runMode = RunMode.overwrite
 var didFindViolations = false
 
-guard let data = FileManager.default.contents(atPath: logPath),
-    let logContents = String(data: data, encoding: .utf8) else {
-        fatalError("couldn't read log file at path '\(logPath)'")
+func parseXCBuildLog(_ data: Data) -> [String: [String]] {
+    let str = String(data: data, encoding: .utf8)!
+    let yaml = try! Yams.load(yaml: str) as! [String: Any]
+    let commands = yaml["commands"] as! [String: Any]
+    var fileToArgs = [String: [String]]()
+    for (key, value) in commands {
+        if !key.contains("com.apple.xcode.tools.swift.compiler") {
+            continue
+        }
+
+        let valueDictionary = value as! [String: Any]
+        let inputs = valueDictionary["inputs"] as! [String]
+        let args = valueDictionary["args"] as! [String]
+        let filteredArgs = Array(args[4...])
+        assert(filteredArgs.first!.hasSuffix("swiftc"))
+        for input in inputs {
+            if input.hasSuffix(".swift") {
+                fileToArgs[input] = filteredArgs
+            }
+        }
+    }
+
+    return fileToArgs
 }
+
+guard let data = FileManager.default.contents(atPath: logPath) else {
+    fatalError("couldn't read log file at path '\(logPath)'")
+}
+
+let log = parseXCBuildLog(data)
 
 let files = FileManager.default.filesToLint(inPath: "")
 DispatchQueue.concurrentPerform(iterations: files.count) { index in
     let path = files[index]
+    let arguments = log[path]
 
-    guard let compilableFile = CompilableFile(file: path, logContents: logContents) else {
+    guard let compilableFile = CompilableFile(file: path, args: arguments) else {
         print("Couldn't find compiler arguments for file. Skipping: \(path)")
         return
     }
