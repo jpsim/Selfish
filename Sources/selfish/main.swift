@@ -232,6 +232,15 @@ enum RunMode {
 let runMode = RunMode.overwrite
 var didFindViolations = false
 
+func filterBadArgs(_ args: [String]) -> [String] {
+    let a2 = args[4...]
+        .filter { $0 != "-incremental" }
+        .filter { $0 != "-parseable-output" }
+        .filter { $0 != "-output-file-map" }
+        .filter { !$0.hasSuffix("OutputFileMap.json") }
+    return Array(a2)
+}
+
 func parseXCBuildLog(_ data: Data) -> [String: [String]] {
     let str = String(data: data, encoding: .utf8)!
     let yaml = try! Yams.load(yaml: str) as! [String: Any]
@@ -245,7 +254,7 @@ func parseXCBuildLog(_ data: Data) -> [String: [String]] {
         let valueDictionary = value as! [String: Any]
         let inputs = valueDictionary["inputs"] as! [String]
         let args = valueDictionary["args"] as! [String]
-        let filteredArgs = Array(args[4...])
+        let filteredArgs = filterBadArgs(args)
         assert(filteredArgs.first!.hasSuffix("swiftc"))
         for input in inputs {
             if input.hasSuffix(".swift") {
@@ -264,6 +273,7 @@ guard let data = FileManager.default.contents(atPath: logPath) else {
 let log = parseXCBuildLog(data)
 
 let files = FileManager.default.filesToLint(inPath: "")
+// for path in files {
 DispatchQueue.concurrentPerform(iterations: files.count) { index in
     let path = files[index]
     let arguments = log[path]
@@ -329,6 +339,8 @@ DispatchQueue.concurrentPerform(iterations: files.count) { index in
     if !cursorsMissingExplicitSelf.isEmpty {
         didFindViolations = true
     }
+
+    // break
 }
 
 exit(didFindViolations ? 1 : 0)
