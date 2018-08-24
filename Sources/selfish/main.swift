@@ -151,7 +151,6 @@ private func parseXCBuildDefinition(_ logString: String) throws -> [String: [Str
     return fileToArgs
 }
 
-
 private let kindsToFind = Set([
     "source.lang.swift.ref.function.method.instance",
     "source.lang.swift.ref.var.instance"
