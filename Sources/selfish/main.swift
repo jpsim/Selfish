@@ -1,5 +1,6 @@
 import Foundation
 import SourceKittenFramework
+import Yams
 
 guard CommandLine.arguments.count == 2 else {
     print("Usage: selfish xcodebuild-log-path")
@@ -17,31 +18,14 @@ final class CompilableFile {
     let file: String
     let compilerArguments: [String]
 
-    init?(file: String, logContents: String) {
+    init?(file: String, arguments: [String]?) {
         self.file = file
-        if let args = compileCommand(logContents: logContents, sourceFile: file) {
-            self.compilerArguments = args
+        if let arguments = arguments {
+            self.compilerArguments = arguments
         } else {
             return nil
         }
     }
-}
-
-func compileCommand(logContents: String, sourceFile: String) -> [String]? {
-    var compileCommand: [String]?
-    let escapedSourceFile = sourceFile.replacingOccurrences(of: " ", with: "\\ ")
-    if logContents.contains(escapedSourceFile)
-    {
-        logContents.enumerateLines { line, stop in
-            if line.contains(escapedSourceFile),
-                let swiftcIndex = line.range(of: "swiftc ")?.upperBound,
-                line.contains(" -module-name ") {
-                compileCommand = parseCLIArguments(String(line[swiftcIndex...]))
-                stop = true
-            }
-        }
-    }
-    return compileCommand
 }
 
 func parseCLIArguments(_ string: String) -> [String] {
@@ -115,6 +99,56 @@ private func filter(arguments args: [String]) -> [String] {
         }
         return $0
     }
+}
+
+private enum ParsingError: LocalizedError {
+    case failedToParse
+    case invalidArguments(arguments: [String])
+
+    var localizedDescription: String? {
+        switch self {
+        case .failedToParse:
+            return "Failed to parse xcbuild definition"
+        case .invalidArguments(let arguments):
+            return "Unexpected arguments for swiftc: \(arguments.joined(separator: " "))"
+        }
+    }
+}
+
+private func stripXCBuildExec(from arguments: [String]) throws -> [String] {
+    if let dashIndex = arguments.index(of: "--") {
+        let index = arguments.index(after: dashIndex)
+        return Array(arguments[index...])
+    }
+
+    throw ParsingError.invalidArguments(arguments: arguments)
+}
+
+private func parseXCBuildDefinition(_ logString: String) throws -> [String: [String]] {
+    guard let yaml = (try? Yams.load(yaml: logString)) as? [String: Any],
+        let commands = yaml["commands"] as? [String: Any] else {
+            throw ParsingError.failedToParse
+    }
+
+    var fileToArgs = [String: [String]]()
+    for (key, value) in commands {
+        if !key.contains("com.apple.xcode.tools.swift.compiler") {
+            continue
+        }
+
+        guard let valueDictionary = value as? [String: Any],
+            let inputs = valueDictionary["inputs"] as? [String],
+            let arguments = valueDictionary["args"] as? [String] else {
+                continue
+        }
+
+        let filteredArgs = filter(arguments: try stripXCBuildExec(from: arguments))
+        for input in inputs where input.hasSuffix(".swift") {
+            fileToArgs[input] = filteredArgs
+        }
+    }
+
+    return fileToArgs
 }
 
 private let kindsToFind = Set([
@@ -227,11 +261,13 @@ guard let data = FileManager.default.contents(atPath: logPath),
         fatalError("couldn't read log file at path '\(logPath)'")
 }
 
+let buildDefinition = try parseXCBuildDefinition(logContents)
 let files = FileManager.default.filesToLint(inPath: "")
 DispatchQueue.concurrentPerform(iterations: files.count) { index in
     let path = files[index]
+    let arguments = buildDefinition[path]
 
-    guard let compilableFile = CompilableFile(file: path, logContents: logContents) else {
+    guard let compilableFile = CompilableFile(file: path, arguments: arguments) else {
         print("Couldn't find compiler arguments for file. Skipping: \(path)")
         return
     }
