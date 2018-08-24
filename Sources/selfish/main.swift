@@ -116,7 +116,8 @@ private enum ParsingError: LocalizedError {
 }
 
 private func stripXCBuildExec(from arguments: [String]) throws -> [String] {
-    if let index = arguments.index(of: "--") {
+    if let dashIndex = arguments.index(of: "--") {
+        let index = arguments.index(after: dashIndex)
         return Array(arguments[index...])
     }
 
