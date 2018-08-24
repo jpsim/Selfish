@@ -18,10 +18,10 @@ final class CompilableFile {
     let file: String
     let compilerArguments: [String]
 
-    init?(file: String, args: [String]?) {
+    init?(file: String, arguments: [String]?) {
         self.file = file
-        if let args = args {
-            self.compilerArguments = args
+        if let arguments = arguments {
+            self.compilerArguments = arguments
         } else {
             return nil
         }
@@ -268,7 +268,7 @@ DispatchQueue.concurrentPerform(iterations: files.count) { index in
     let path = files[index]
     let arguments = buildDefinition[path]
 
-    guard let compilableFile = CompilableFile(file: path, args: arguments) else {
+    guard let compilableFile = CompilableFile(file: path, arguments: arguments) else {
         print("Couldn't find compiler arguments for file. Skipping: \(path)")
         return
     }
