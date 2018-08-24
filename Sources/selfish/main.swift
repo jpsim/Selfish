@@ -262,7 +262,6 @@ guard let data = FileManager.default.contents(atPath: logPath),
 }
 
 let buildDefinition = try parseXCBuildDefinition(logContents)
-
 let files = FileManager.default.filesToLint(inPath: "")
 DispatchQueue.concurrentPerform(iterations: files.count) { index in
     let path = files[index]
