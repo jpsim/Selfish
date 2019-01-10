@@ -2,6 +2,133 @@ import Foundation
 import SourceKittenFramework
 import Yams
 
+//Rough flow iboutletlint
+//
+//1. Collect all storyboard/xib outlets
+//1. class
+//2. module
+//3. type
+//4. property name
+//5. containing resource bundle
+//2. Collect all IBOutlets declared in source code + superclasses
+//3. Collect all storyboard/xib IBActions
+//4. Collect all IBActions declared in source code + superclasses
+
+extension Dictionary where Key: ExpressibleByStringLiteral {
+    /// Accessibility.
+    var accessibility: String? {
+        return self["key.accessibility"] as? String
+    }
+    /// Body length.
+    var bodyLength: Int? {
+        return (self["key.bodylength"] as? Int64).flatMap({ Int($0) })
+    }
+    /// Body offset.
+    var bodyOffset: Int? {
+        return (self["key.bodyoffset"] as? Int64).flatMap({ Int($0) })
+    }
+    /// Kind.
+    var kind: String? {
+        return self["key.kind"] as? String
+    }
+    /// Length.
+    var length: Int? {
+        return (self["key.length"] as? Int64).flatMap({ Int($0) })
+    }
+    /// Name.
+    var name: String? {
+        return self["key.name"] as? String
+    }
+    /// Name length.
+    var nameLength: Int? {
+        return (self["key.namelength"] as? Int64).flatMap({ Int($0) })
+    }
+    /// Name offset.
+    var nameOffset: Int? {
+        return (self["key.nameoffset"] as? Int64).flatMap({ Int($0) })
+    }
+    /// Offset.
+    var offset: Int? {
+        return (self["key.offset"] as? Int64).flatMap({ Int($0) })
+    }
+    /// Setter accessibility.
+    var setterAccessibility: String? {
+        return self["key.setter_accessibility"] as? String
+    }
+    /// Type name.
+    var typeName: String? {
+        return self["key.typename"] as? String
+    }
+    /// Column where the token's declaration begins.
+    var docColumn: Int? {
+        return (self["key.doc.column"] as? Int64).flatMap({ Int($0) })
+    }
+    /// Line where the token's declaration begins.
+    var docLine: Int? {
+        return (self["key.doc.line"] as? Int64).flatMap({ Int($0) })
+    }
+    /// Parsed scope start.
+    var docType: Int? {
+        return (self["key.doc.type"] as? Int64).flatMap({ Int($0) })
+    }
+    /// Parsed scope start end.
+    var usr: Int? {
+        return (self["key.usr"] as? Int64).flatMap({ Int($0) })
+    }
+    /// Documentation length.
+    var docLength: Int? {
+        return (self["key.doclength"] as? Int64).flatMap({ Int($0) })
+    }
+
+    var attribute: String? {
+        return self["key.attribute"] as? String
+    }
+
+    var enclosedSwiftAttributes: [SwiftDeclarationAttributeKind] {
+        return swiftAttributes.compactMap { $0.attribute }
+            .compactMap(SwiftDeclarationAttributeKind.init(rawValue:))
+    }
+
+    var swiftAttributes: [[String: SourceKitRepresentable]] {
+        let array = self["key.attributes"] as? [SourceKitRepresentable] ?? []
+        let dictionaries = array.compactMap { ($0 as? [String: SourceKitRepresentable]) }
+        return dictionaries
+    }
+
+    var substructure: [[String: SourceKitRepresentable]] {
+        let substructure = self["key.substructure"] as? [SourceKitRepresentable] ?? []
+        return substructure.compactMap { $0 as? [String: SourceKitRepresentable] }
+    }
+
+    var elements: [[String: SourceKitRepresentable]] {
+        let elements = self["key.elements"] as? [SourceKitRepresentable] ?? []
+        return elements.compactMap { $0 as? [String: SourceKitRepresentable] }
+    }
+
+
+    var inheritedTypes: [String] {
+        let array = self["key.inheritedtypes"] as? [SourceKitRepresentable] ?? []
+        return array.compactMap { ($0 as? [String: String])?.name }
+    }
+
+}
+
+extension Dictionary where Key == String {
+    /// Returns a dictionary with SwiftLint violation markers (↓) removed from keys.
+    func removingViolationMarkers() -> [Key: Value] {
+        return Dictionary(uniqueKeysWithValues: map { ($0.replacingOccurrences(of: "↓", with: ""), $1) })
+    }
+}
+
+
+func findIBOutlets(in dictionary: [String : SourceKitRepresentable]) -> [(String, String)] {
+    if dictionary.enclosedSwiftAttributes.contains(.iboutlet) {
+        return [(dictionary.name!, dictionary.typeName!)]
+    } else {
+        return dictionary.substructure.flatMap(findIBOutlets(in:))
+    }
+}
+
 guard CommandLine.arguments.count == 2 else {
     print("Usage: selfish xcodebuild-log-path")
     abort()
@@ -228,26 +355,6 @@ func binaryOffsets(for compilableFile: CompilableFile) throws -> [Int] {
     return binaryOffsets.sorted()
 }
 
-func swiftFilesChangedFromMaster() -> [String]? {
-    let task = Process()
-    task.launchPath = "/usr/bin/git"
-    task.arguments = ["diff", "--name-only", "origin/master", "HEAD"]
-
-    let pipe = Pipe()
-    task.standardOutput = pipe
-    task.launch()
-
-    let data = pipe.fileHandleForReading.readDataToEndOfFile()
-    guard let output = String(data: data, encoding: .utf8) else {
-        return nil
-    }
-    return output.components(separatedBy: .newlines)
-        .filter { !$0.isEmpty }
-        .filter { file in
-            return file.bridge().isSwiftFile() && FileManager.default.fileExists(atPath: file)
-    }
-}
-
 enum RunMode {
   case log
   case overwrite
@@ -278,56 +385,9 @@ DispatchQueue.concurrentPerform(iterations: files.count) { index in
     }
 
     print("Linting \(index)/\(files.count) \(path)")
+    let structure = try! Structure(file: file)
 
-    let byteOffsets: [Int]
-    let allCursorInfo: [[String: SourceKitRepresentable]]
-    do {
-        byteOffsets = try binaryOffsets(for: compilableFile)
-        allCursorInfo = try file.allCursorInfo(compilerArguments: compilableFile.compilerArguments,
-                                               atByteOffsets: byteOffsets)
-    } catch {
-        print(error)
-        return
-    }
-
-    let cursorsMissingExplicitSelf = allCursorInfo.filter { cursorInfo in
-        guard let kindString = cursorInfo["key.kind"] as? String else { return false }
-        return kindsToFind.contains(kindString)
-    }
-
-    let contents = file.contents.bridge().mutableCopy() as! NSMutableString
-
-    if runMode == .log {
-        for cursorInfo in cursorsMissingExplicitSelf {
-            guard let byteOffset = cursorInfo["jp.offset"] as? Int64,
-                let (line, char) = contents.lineAndCharacter(forByteOffset: Int(byteOffset))
-                else { fatalError("couldn't convert offsets") }
-            print("\(compilableFile.file):\(line):\(char): error: Missing explicit reference to 'self.'")
-            didFindViolations = true
-        }
-        return
-    }
-
-    for cursorInfo in cursorsMissingExplicitSelf.reversed() {
-        guard let byteOffset = cursorInfo["jp.offset"] as? Int64,
-            let nsrangeToInsert = contents.byteRangeToNSRange(start: Int(byteOffset), length: 0)
-            else { fatalError("couldn't convert offsets") }
-        contents.replaceCharacters(in: nsrangeToInsert, with: "self.")
-    }
-
-    guard let stringData = contents.bridge().data(using: .utf8) else {
-        fatalError("can't encode '\(contents)' with UTF8")
-    }
-
-    do {
-        try stringData.write(to: URL(fileURLWithPath: compilableFile.file), options: .atomic)
-    } catch {
-        fatalError("can't write file to \(compilableFile.file)")
-    }
-
-    if !cursorsMissingExplicitSelf.isEmpty {
-        didFindViolations = true
-    }
+    print(findIBOutlets(in: structure.dictionary))
 }
 
 exit(didFindViolations ? 1 : 0)
