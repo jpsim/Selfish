@@ -115,15 +115,6 @@ private enum ParsingError: LocalizedError {
     }
 }
 
-private func stripXCBuildExec(from arguments: [String]) throws -> [String] {
-    if let dashIndex = arguments.index(of: "--") {
-        let index = arguments.index(after: dashIndex)
-        return Array(arguments[index...])
-    }
-
-    throw ParsingError.invalidArguments(arguments: arguments)
-}
-
 private func parseXCBuildDefinition(_ logString: String) throws -> [String: [String]] {
     guard let yaml = (try? Yams.load(yaml: logString)) as? [String: Any],
         let commands = yaml["commands"] as? [String: Any] else {
@@ -142,7 +133,7 @@ private func parseXCBuildDefinition(_ logString: String) throws -> [String: [Str
                 continue
         }
 
-        let filteredArgs = filter(arguments: try stripXCBuildExec(from: arguments))
+        let filteredArgs = filter(arguments: arguments)
         for input in inputs where input.hasSuffix(".swift") {
             fileToArgs[input] = filteredArgs
         }
