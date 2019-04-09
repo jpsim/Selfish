@@ -294,7 +294,6 @@ DispatchQueue.concurrentPerform(iterations: files.count) { index in
                 let (line, char) = contents.lineAndCharacter(forByteOffset: Int(byteOffset))
                 else { fatalError("couldn't convert offsets") }
             print("\(compilableFile.file):\(line):\(char): error: Missing explicit reference to 'self.'")
-            didFindViolations = true
         }
         return
     }
@@ -315,10 +314,4 @@ DispatchQueue.concurrentPerform(iterations: files.count) { index in
     } catch {
         fatalError("can't write file to \(compilableFile.file)")
     }
-
-    if !cursorsMissingExplicitSelf.isEmpty {
-        didFindViolations = true
-    }
 }
-
-exit(didFindViolations ? 1 : 0)
